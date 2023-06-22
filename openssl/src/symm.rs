@@ -147,6 +147,18 @@ impl Cipher {
         unsafe { Cipher(ffi::EVP_aes_128_ocb()) }
     }
 
+    /// Requires OpenSSL 1.0.2 or newer.
+    #[cfg(ossl102)]
+    pub fn aes_128_wrap() -> Cipher {
+        unsafe { Cipher(ffi::EVP_aes_128_wrap()) }
+    }
+
+    /// Requires OpenSSL 1.1.0 or newer.
+    #[cfg(ossl110)]
+    pub fn aes_128_wrap_pad() -> Cipher {
+        unsafe { Cipher(ffi::EVP_aes_128_wrap_pad()) }
+    }
+
     pub fn aes_192_ecb() -> Cipher {
         unsafe { Cipher(ffi::EVP_aes_192_ecb()) }
     }
@@ -190,6 +202,18 @@ impl Cipher {
     #[cfg(all(ossl110, not(osslconf = "OPENSSL_NO_OCB")))]
     pub fn aes_192_ocb() -> Cipher {
         unsafe { Cipher(ffi::EVP_aes_192_ocb()) }
+    }
+
+    /// Requires OpenSSL 1.0.2 or newer.
+    #[cfg(ossl102)]
+    pub fn aes_192_wrap() -> Cipher {
+        unsafe { Cipher(ffi::EVP_aes_192_wrap()) }
+    }
+
+    /// Requires OpenSSL 1.1.0 or newer.
+    #[cfg(ossl110)]
+    pub fn aes_192_wrap_pad() -> Cipher {
+        unsafe { Cipher(ffi::EVP_aes_192_wrap_pad()) }
     }
 
     pub fn aes_256_ecb() -> Cipher {
@@ -240,6 +264,18 @@ impl Cipher {
     #[cfg(all(ossl110, not(osslconf = "OPENSSL_NO_OCB")))]
     pub fn aes_256_ocb() -> Cipher {
         unsafe { Cipher(ffi::EVP_aes_256_ocb()) }
+    }
+
+    /// Requires OpenSSL 1.0.2 or newer.
+    #[cfg(ossl102)]
+    pub fn aes_256_wrap() -> Cipher {
+        unsafe { Cipher(ffi::EVP_aes_256_wrap()) }
+    }
+
+    /// Requires OpenSSL 1.1.0 or newer.
+    #[cfg(ossl110)]
+    pub fn aes_256_wrap_pad() -> Cipher {
+        unsafe { Cipher(ffi::EVP_aes_256_wrap_pad()) }
     }
 
     #[cfg(not(osslconf = "OPENSSL_NO_BF"))]
@@ -503,6 +539,27 @@ impl Crypter {
             Mode::Decrypt => CipherCtxRef::decrypt_init,
         };
 
+        cfg_if! {
+            if #[cfg(ossl110)] {
+                if t == Cipher::aes_128_wrap()
+                    || t == Cipher::aes_128_wrap_pad()
+                    || t == Cipher::aes_192_wrap()
+                    || t == Cipher::aes_192_wrap_pad()
+                    || t == Cipher::aes_256_wrap()
+                    || t == Cipher::aes_256_wrap_pad()
+                {
+                    ctx.set_flags(ffi::EVP_CIPHER_CTX_FLAG_WRAP_ALLOW);
+                }
+            } else if #[cfg(ossl102)] {
+                if t == Cipher::aes_128_wrap()
+                    || t == Cipher::aes_192_wrap()
+                    || t == Cipher::aes_256_wrap()
+                {
+                    ctx.set_flags(ffi::EVP_CIPHER_CTX_FLAG_WRAP_ALLOW);
+                }
+            }
+        }
+
         f(
             &mut ctx,
             Some(unsafe { CipherRef::from_ptr(t.as_ptr() as *mut _) }),
@@ -696,7 +753,8 @@ fn cipher(
     data: &[u8],
 ) -> Result<Vec<u8>, ErrorStack> {
     let mut c = Crypter::new(t, mode, key, iv)?;
-    let mut out = vec![0; data.len() + t.block_size()];
+    let padding = 8 - data.len() % 8;
+    let mut out = vec![0; data.len() + padding + t.block_size() * 2];
     let count = c.update(data, &mut out)?;
     let rest = c.finalize(&mut out[count..])?;
     out.truncate(count + rest);
@@ -922,6 +980,29 @@ mod tests {
         }
     }
 
+    #[cfg(ossl102)]
+    fn cipher_test_no_iv(ciphertype: super::Cipher, pt: &str, ct: &str, key: &str) {
+        let pt = Vec::from_hex(pt).unwrap();
+        let ct = Vec::from_hex(ct).unwrap();
+        let key = Vec::from_hex(key).unwrap();
+
+        let computed = super::decrypt(ciphertype, &key, None, &ct).unwrap();
+        let expected = pt;
+
+        if computed != expected {
+            println!("Computed: {}", hex::encode(&computed));
+            println!("Expected: {}", hex::encode(&expected));
+            if computed.len() != expected.len() {
+                println!(
+                    "Lengths differ: {} in computed vs {} expected",
+                    computed.len(),
+                    expected.len()
+                );
+            }
+            panic!("test failure");
+        }
+    }
+
     #[cfg(not(boringssl))]
     fn cipher_test_nopad(ciphertype: super::Cipher, pt: &str, ct: &str, key: &str, iv: &str) {
         let pt = Vec::from_hex(pt).unwrap();
@@ -1043,6 +1124,48 @@ mod tests {
     }
 
     #[test]
+    #[cfg(ossl102)]
+    fn test_aes128_wrap() {
+        let pt = "00112233445566778899aabbccddeeff";
+        let ct = "7940ff694448b5bb5139c959a4896832e55d69aa04daa27e";
+        let key = "2b7e151628aed2a6abf7158809cf4f3c";
+        let iv = "0001020304050607";
+
+        cipher_test(super::Cipher::aes_128_wrap(), pt, ct, key, iv);
+    }
+
+    #[test]
+    #[cfg(ossl102)]
+    fn test_aes128_wrap_default_iv() {
+        let pt = "00112233445566778899aabbccddeeff";
+        let ct = "38f1215f0212526f8a70b51955b9fbdc9fe3041d9832306e";
+        let key = "2b7e151628aed2a6abf7158809cf4f3c";
+
+        cipher_test_no_iv(super::Cipher::aes_128_wrap(), pt, ct, key);
+    }
+
+    #[test]
+    #[cfg(ossl110)]
+    fn test_aes128_wrap_pad() {
+        let pt = "00112233445566778899aabbccddee";
+        let ct = "f13998f5ab32ef82a1bdbcbe585e1d837385b529572a1e1b";
+        let key = "2b7e151628aed2a6abf7158809cf4f3c";
+        let iv = "00010203";
+
+        cipher_test(super::Cipher::aes_128_wrap_pad(), pt, ct, key, iv);
+    }
+
+    #[test]
+    #[cfg(ossl110)]
+    fn test_aes128_wrap_pad_default_iv() {
+        let pt = "00112233445566778899aabbccddee";
+        let ct = "3a501085fb8cf66f4186b7df851914d471ed823411598add";
+        let key = "2b7e151628aed2a6abf7158809cf4f3c";
+
+        cipher_test_no_iv(super::Cipher::aes_128_wrap_pad(), pt, ct, key);
+    }
+
+    #[test]
     fn test_aes192_ctr() {
         // Lifted from http://csrc.nist.gov/publications/nistpubs/800-38a/sp800-38a.pdf
 
@@ -1106,6 +1229,48 @@ mod tests {
     }
 
     #[test]
+    #[cfg(ossl102)]
+    fn test_aes192_wrap() {
+        let pt = "9f6dee187d35302116aecbfd059657efd9f7589c4b5e7f5b";
+        let ct = "83b89142dfeeb4871e078bfb81134d33e23fedc19b03a1cf689973d3831b6813";
+        let key = "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b";
+        let iv = "0001020304050607";
+
+        cipher_test(super::Cipher::aes_192_wrap(), pt, ct, key, iv);
+    }
+
+    #[test]
+    #[cfg(ossl102)]
+    fn test_aes192_wrap_default_iv() {
+        let pt = "9f6dee187d35302116aecbfd059657efd9f7589c4b5e7f5b";
+        let ct = "c02c2cf11505d3e4851030d5534cbf5a1d7eca7ba8839adbf239756daf1b43e6";
+        let key = "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b";
+
+        cipher_test_no_iv(super::Cipher::aes_192_wrap(), pt, ct, key);
+    }
+
+    #[test]
+    #[cfg(ossl110)]
+    fn test_aes192_wrap_pad() {
+        let pt = "00112233445566778899aabbccddee";
+        let ct = "b4f6bb167ef7caf061a74da82b36ad038ca057ab51e98d3a";
+        let key = "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b";
+        let iv = "00010203";
+
+        cipher_test(super::Cipher::aes_192_wrap_pad(), pt, ct, key, iv);
+    }
+
+    #[test]
+    #[cfg(ossl110)]
+    fn test_aes192_wrap_pad_default_iv() {
+        let pt = "00112233445566778899aabbccddee";
+        let ct = "b2c37a28cc602753a7c944a4c2555a2df9c98b2eded5312e";
+        let key = "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b";
+
+        cipher_test_no_iv(super::Cipher::aes_192_wrap_pad(), pt, ct, key);
+    }
+
+    #[test]
     #[cfg(not(boringssl))]
     fn test_aes256_cfb1() {
         let pt = "6bc1";
@@ -1148,6 +1313,48 @@ mod tests {
         let iv = "000102030405060708090a0b0c0d0e0f";
 
         cipher_test(super::Cipher::aes_256_ofb(), pt, ct, key, iv);
+    }
+
+    #[test]
+    #[cfg(ossl102)]
+    fn test_aes256_wrap() {
+        let pt = "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51";
+        let ct = "cc05da2a7f56f7dd0c144231f90bce58648fa20a8278f5a6b7d13bba6aa57a33229d4333866b7fd6";
+        let key = "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4";
+        let iv = "0001020304050607";
+
+        cipher_test(super::Cipher::aes_256_wrap(), pt, ct, key, iv);
+    }
+
+    #[test]
+    #[cfg(ossl102)]
+    fn test_aes256_wrap_default_iv() {
+        let pt = "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51";
+        let ct = "0b24f068b50e52bc6987868411c36e1b03900866ed12af81eb87cef70a8d1911731c1d7abf789d88";
+        let key = "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4";
+
+        cipher_test_no_iv(super::Cipher::aes_256_wrap(), pt, ct, key);
+    }
+
+    #[test]
+    #[cfg(ossl110)]
+    fn test_aes256_wrap_pad() {
+        let pt = "00112233445566778899aabbccddee";
+        let ct = "91594e044ccc06130d60e6c84a996aa4f96a9faff8c5f6e7";
+        let key = "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4";
+        let iv = "00010203";
+
+        cipher_test(super::Cipher::aes_256_wrap_pad(), pt, ct, key, iv);
+    }
+
+    #[test]
+    #[cfg(ossl110)]
+    fn test_aes256_wrap_pad_default_iv() {
+        let pt = "00112233445566778899aabbccddee";
+        let ct = "dc3c166a854afd68aea624a4272693554bf2e4fcbae602cd";
+        let key = "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4";
+
+        cipher_test_no_iv(super::Cipher::aes_256_wrap_pad(), pt, ct, key);
     }
 
     #[test]

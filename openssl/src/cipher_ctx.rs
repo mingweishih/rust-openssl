@@ -509,6 +509,18 @@ impl CipherCtxRef {
         Ok(())
     }
 
+    /// Set ctx flags.
+    ///
+    /// This function is currently used internally to enable AES key wrap feature
+    /// supported by OpenSSL 1.0.2 or newer.
+    #[corresponds(EVP_CIPHER_CTX_set_flags)]
+    #[cfg(ossl102)]
+    pub(crate) fn set_flags(&mut self, flags: i32) {
+        unsafe {
+            ffi::EVP_CIPHER_CTX_set_flags(self.as_ptr(), flags);
+        }
+    }
+
     /// Writes data into the context.
     ///
     /// Providing no output buffer will cause the input to be considered additional authenticated data (AAD).
